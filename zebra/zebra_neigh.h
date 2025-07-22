@@ -50,5 +50,8 @@ extern void zebra_neigh_terminate(void);
 extern void zebra_neigh_deref(struct zebra_pbr_rule *rule);
 extern void zebra_neigh_ref(int ifindex, struct ipaddr *ip,
 			    struct zebra_pbr_rule *rule);
+void zebra_neigh_dplane_result(struct zebra_dplane_ctx *ctx);
+void zebra_neigh_ipaddr_update(struct zebra_dplane_ctx *ctx);
+void zebra_neigh_macfdb_update(struct zebra_dplane_ctx *ctx);
 
 #endif /* _ZEBRA_NEIGH_H */

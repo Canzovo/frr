@@ -474,6 +474,69 @@ void dplane_ctx_set_ifp_bridge_vlan_info_array(
 const struct zebra_dplane_bridge_vlan_info_array *
 dplane_ctx_get_ifp_bridge_vlan_info_array(const struct zebra_dplane_ctx *ctx);
 
+void dplane_ctx_set_neigh_ipaddr(struct zebra_dplane_ctx *ctx, struct ipaddr ip);
+struct ipaddr dplane_ctx_get_neigh_ipaddr(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_mac(struct zebra_dplane_ctx *ctx, struct ethaddr mac);
+struct ethaddr dplane_ctx_get_neigh_mac(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_mac_present(struct zebra_dplane_ctx *ctx,
+				 int mac_present);
+int dplane_ctx_get_neigh_mac_present(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_is_ext(struct zebra_dplane_ctx *ctx, bool is_ext);
+bool dplane_ctx_get_neigh_is_ext(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_is_router(struct zebra_dplane_ctx *ctx, bool is_router);
+bool dplane_ctx_get_neigh_is_router(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_local_inactive(struct zebra_dplane_ctx *ctx,
+					  bool local_inactive);
+bool dplane_ctx_get_neigh_local_inactive(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_ext_flags(struct zebra_dplane_ctx *ctx,
+				     uint32_t ext_flags);
+uint32_t dplane_ctx_get_neigh_ext_flags(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_dp_static(struct zebra_dplane_ctx *ctx,
+				     bool dp_static);
+bool dplane_ctx_get_neigh_dp_static(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_l2_len(struct zebra_dplane_ctx *ctx, int l2_len);
+int dplane_ctx_get_neigh_l2_len(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_cmd(struct zebra_dplane_ctx *ctx, int cmd);
+int dplane_ctx_get_neigh_cmd(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_ndm_state(struct zebra_dplane_ctx *ctx, uint16_t ndm_state);//__u16
+uint16_t dplane_ctx_get_neigh_ndm_state(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_ndm_family(struct zebra_dplane_ctx *ctx, uint32_t ndm_family); //__u8
+uint32_t dplane_ctx_get_neigh_ndm_family(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_ndm_flags(struct zebra_dplane_ctx *ctx, uint32_t ndm_flags);
+uint32_t dplane_ctx_get_neigh_ndm_flags(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_desc(struct zebra_dplane_ctx *ctx, const char *desc);
+const char *dplane_ctx_get_neigh_desc(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_neigh_nlmsg_type(struct zebra_dplane_ctx *ctx, uint16_t nlmsg_type);
+uint16_t dplane_ctx_get_neigh_nlmsg_type(const struct zebra_dplane_ctx *ctx);
+
+// forwarding database neighbor 
+void dplane_ctx_set_fdb_nlmsg_type(struct zebra_dplane_ctx *ctx, uint16_t nlmsg_type);
+uint16_t dplane_ctx_get_fdb_nlmsg_type(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_mac(struct zebra_dplane_ctx *ctx, struct ethaddr mac);
+struct ethaddr dplane_ctx_get_fdb_mac(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_vid(struct zebra_dplane_ctx *ctx, vlanid_t vid);
+vlanid_t dplane_ctx_get_fdb_vid(const struct zebra_dplane_ctx *ctx);
+vni_t dplane_ctx_get_fdb_vni(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_vni(struct zebra_dplane_ctx *ctx, vni_t vni);
+// uint32_t dplane_ctx_get_fdb_vni_mcast_grp(const struct zebra_dplane_ctx *ctx);
+// void dplane_ctx_set_fdb_vni_mcast_grp(struct zebra_dplane_ctx *ctx, uint32_t vni_mcast_grp);
+void dplane_ctx_set_fdb_nhg_id(struct zebra_dplane_ctx *ctx, uint32_t nhg_id);
+uint32_t dplane_ctx_get_fdb_nhg_id(const struct zebra_dplane_ctx *ctx);
+uint32_t dplane_ctx_get_fdb_dst_present(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_dst_present(struct zebra_dplane_ctx *ctx, uint32_t dst_present);
+void dplane_ctx_set_fdb_is_sticky(struct zebra_dplane_ctx *ctx, bool is_sticky);
+bool dplane_ctx_get_fdb_is_sticky(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_vtep_ip(struct zebra_dplane_ctx *ctx, const struct in_addr vtep_ip);
+struct in_addr dplane_ctx_get_fdb_vtep_ip(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_local_inactive(struct zebra_dplane_ctx *ctx, bool local_inactive);
+bool dplane_ctx_get_fdb_local_inactive(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_dp_static(struct zebra_dplane_ctx *ctx, bool dp_static);
+bool dplane_ctx_get_fdb_dp_static(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_ndm_state(struct zebra_dplane_ctx *ctx, uint16_t ndm_state);//__u16
+uint16_t dplane_ctx_get_fdb_ndm_state(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_fdb_ndm_flags(struct zebra_dplane_ctx *ctx, uint8_t ndm_flags);
+uint8_t dplane_ctx_get_fdb_ndm_flags(const struct zebra_dplane_ctx *ctx);
+
 /* Retrieve last/current provider id */
 uint32_t dplane_ctx_get_provider(const struct zebra_dplane_ctx *ctx);
 

@@ -15,6 +15,11 @@
 extern "C" {
 #endif
 
+#define NUD_VALID                                                              \
+	(NUD_PERMANENT | NUD_NOARP | NUD_REACHABLE | NUD_PROBE | NUD_STALE     \
+	 | NUD_DELAY)
+#define NUD_LOCAL_ACTIVE                                                 \
+	(NUD_PERMANENT | NUD_NOARP | NUD_REACHABLE)
 
 /*
  * Additional protocol strings to push into routes
@@ -100,7 +105,12 @@ extern int netlink_macfdb_read_specific_mac(struct zebra_ns *zns,
 					    uint16_t vid);
 extern int netlink_neigh_read_specific_ip(const struct ipaddr *ip,
 					  struct interface *vlan_if);
+extern void netlink_handle_5549(uint32_t ndm_family, uint32_t ndm_state,
+	 struct zebra_if *zif,struct interface *ifp, struct ipaddr *ip,bool handle_failed);
 
+extern bool is_mac_vni_mcast_group(struct ethaddr *mac, vni_t vni,
+				   struct in_addr grp_addr);
+				   
 struct nl_batch;
 extern enum netlink_msg_status
 netlink_put_route_update_msg(struct nl_batch *bth,
@@ -145,6 +155,7 @@ const char *nh_flags2str(uint32_t flags, char *buf, size_t buflen);
 void nl_dump(void *msg, size_t msglen);
 
 extern int zebra2proto(int proto);
+int netlink_nbr_entry_state_to_zclient(int nbr_state);
 
 #endif /* NETLINK_DEBUG */
 

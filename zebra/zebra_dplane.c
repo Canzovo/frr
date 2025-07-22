@@ -268,6 +268,12 @@ struct dplane_mac_info {
 	bool is_sticky;
 	uint32_t nhg_id;
 	uint32_t update_flags;
+	int dst_present;
+	bool local_inactive;
+	bool dp_static;
+	uint16_t nlmsg_type;
+	uint16_t ndm_state;
+	uint8_t ndm_flags;
 };
 
 /*
@@ -283,6 +289,18 @@ struct dplane_neigh_info {
 	uint32_t flags;
 	uint16_t state;
 	uint32_t update_flags;
+	uint16_t nlmsg_type;
+	uint32_t ndm_family;
+	uint32_t ndm_flags;
+	uint32_t ext_flags;
+	int mac_present;
+	bool is_ext;
+	bool is_router;
+	bool local_inactive;
+	bool dp_static;
+	int l2_len;
+	int cmd;
+	char desc[32];
 };
 
 /*
@@ -3382,6 +3400,376 @@ dplane_ctx_get_vxlan_vlan_array(struct zebra_dplane_ctx *ctx)
 	DPLANE_CTX_VALID(ctx);
 
 	return ctx->u.vlan_info.vlan_array;
+}
+
+void dplane_ctx_set_neigh_ipaddr(struct zebra_dplane_ctx *ctx, struct ipaddr ip)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.ip_addr = ip;
+}
+
+struct ipaddr dplane_ctx_get_neigh_ipaddr(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.ip_addr;
+}
+
+void dplane_ctx_set_neigh_mac(struct zebra_dplane_ctx *ctx, struct ethaddr mac)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.link.mac = mac;
+}
+struct ethaddr dplane_ctx_get_neigh_mac(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.link.mac;
+}
+
+void dplane_ctx_set_neigh_mac_present(struct zebra_dplane_ctx *ctx, int mac_present)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.mac_present = mac_present;
+}
+
+int dplane_ctx_get_neigh_mac_present(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.mac_present;
+}
+
+void dplane_ctx_set_neigh_is_ext(struct zebra_dplane_ctx *ctx, bool is_ext)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.is_ext = is_ext;
+}
+
+bool dplane_ctx_get_neigh_is_ext(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.is_ext;
+}
+
+void dplane_ctx_set_neigh_is_router(struct zebra_dplane_ctx *ctx, bool is_router)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.is_router = is_router;
+}
+
+bool dplane_ctx_get_neigh_is_router(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.is_router;
+}
+
+void dplane_ctx_set_neigh_local_inactive(struct zebra_dplane_ctx *ctx,
+					  bool local_inactive)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.local_inactive = local_inactive;
+}
+
+bool dplane_ctx_get_neigh_local_inactive(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.local_inactive;
+}
+
+void dplane_ctx_set_neigh_ext_flags(struct zebra_dplane_ctx *ctx,
+				     uint32_t ext_flags)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.ext_flags = ext_flags;
+}
+
+uint32_t dplane_ctx_get_neigh_ext_flags(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.ext_flags;
+}
+
+void dplane_ctx_set_neigh_dp_static(struct zebra_dplane_ctx *ctx, bool dp_static)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.dp_static = dp_static;
+}
+
+bool dplane_ctx_get_neigh_dp_static(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.dp_static;
+}
+
+void dplane_ctx_set_neigh_l2_len(struct zebra_dplane_ctx *ctx, int l2_len)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.l2_len = l2_len;
+}
+
+int dplane_ctx_get_neigh_l2_len(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.l2_len;
+}
+
+void dplane_ctx_set_neigh_cmd(struct zebra_dplane_ctx *ctx, int cmd)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.cmd = cmd;
+}
+
+int dplane_ctx_get_neigh_cmd(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.cmd;
+}
+
+void dplane_ctx_set_neigh_ndm_state(struct zebra_dplane_ctx *ctx, uint16_t ndm_state)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.state = ndm_state;
+}
+
+uint16_t dplane_ctx_get_neigh_ndm_state(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.state;
+}
+
+void dplane_ctx_set_neigh_ndm_family(struct zebra_dplane_ctx *ctx, uint32_t ndm_family)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.ndm_family = ndm_family;
+}
+
+uint32_t dplane_ctx_get_neigh_ndm_family(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.ndm_family;
+}
+
+void dplane_ctx_set_neigh_ndm_flags(struct zebra_dplane_ctx *ctx, uint32_t ndm_flags)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.ndm_flags = ndm_flags;
+}
+
+uint32_t dplane_ctx_get_neigh_ndm_flags(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.ndm_flags;
+}
+
+void dplane_ctx_set_neigh_desc(struct zebra_dplane_ctx *ctx, const char *desc)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	strlcpy(ctx->u.neigh.desc, desc, sizeof(ctx->u.neigh.desc));
+}
+
+const char *dplane_ctx_get_neigh_desc(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.desc;
+}
+
+void dplane_ctx_set_neigh_nlmsg_type(struct zebra_dplane_ctx *ctx, uint16_t nlmsg_type) {
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.neigh.nlmsg_type = nlmsg_type;
+}
+
+uint16_t dplane_ctx_get_neigh_nlmsg_type(const struct zebra_dplane_ctx *ctx) {
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.neigh.nlmsg_type;
+}
+
+void dplane_ctx_set_fdb_nlmsg_type(struct zebra_dplane_ctx *ctx, uint16_t nlmsg_type) {
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.nlmsg_type = nlmsg_type;
+}
+
+uint16_t dplane_ctx_get_fdb_nlmsg_type(const struct zebra_dplane_ctx *ctx) {
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.nlmsg_type;
+}
+
+void dplane_ctx_set_fdb_mac(struct zebra_dplane_ctx *ctx, struct ethaddr mac)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.mac = mac;
+}
+
+struct ethaddr dplane_ctx_get_fdb_mac(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.mac;
+}
+
+void dplane_ctx_set_fdb_vid(struct zebra_dplane_ctx *ctx, vlanid_t vid)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.vid = vid;
+}
+
+vlanid_t dplane_ctx_get_fdb_vid(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.vid;
+}			
+
+vni_t dplane_ctx_get_fdb_vni(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.vni;
+}
+void dplane_ctx_set_fdb_vni(struct zebra_dplane_ctx *ctx, vni_t vni)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.vni = vni;
+}
+
+void dplane_ctx_set_fdb_dst_present(struct zebra_dplane_ctx *ctx, uint32_t dst_present)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.dst_present = dst_present;
+}
+
+uint32_t dplane_ctx_get_fdb_dst_present(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.dst_present;
+}
+
+void dplane_ctx_set_fdb_nhg_id(struct zebra_dplane_ctx *ctx, uint32_t nhg_id)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.nhg_id = nhg_id;
+}
+
+uint32_t dplane_ctx_get_fdb_nhg_id(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.nhg_id;
+}
+
+void dplane_ctx_set_fdb_is_sticky(struct zebra_dplane_ctx *ctx, bool is_sticky)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.is_sticky = is_sticky;
+}
+
+bool dplane_ctx_get_fdb_is_sticky(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+	
+	return ctx->u.macinfo.is_sticky;
+}
+
+void dplane_ctx_set_fdb_local_inactive(struct zebra_dplane_ctx *ctx, bool local_inactive)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.local_inactive = local_inactive;
+}
+
+bool dplane_ctx_get_fdb_local_inactive(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.local_inactive;
+}
+
+void dplane_ctx_set_fdb_dp_static(struct zebra_dplane_ctx *ctx, bool dp_static)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.dp_static = dp_static;
+}
+
+bool dplane_ctx_get_fdb_dp_static(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.dp_static;
+}
+
+void dplane_ctx_set_fdb_vtep_ip(struct zebra_dplane_ctx *ctx, const struct in_addr vtep_ip)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.vtep_ip = vtep_ip;
+}
+
+struct in_addr dplane_ctx_get_fdb_vtep_ip(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.vtep_ip;
+}
+
+void dplane_ctx_set_fdb_ndm_state(struct zebra_dplane_ctx *ctx, uint16_t ndm_state) {
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.ndm_state = ndm_state;
+}
+
+uint16_t dplane_ctx_get_fdb_ndm_state(const struct zebra_dplane_ctx *ctx) {
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.ndm_state;
+}
+
+void dplane_ctx_set_fdb_ndm_flags(struct zebra_dplane_ctx *ctx, uint8_t ndm_flags) {
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.macinfo.ndm_flags = ndm_flags;
+}
+
+uint8_t dplane_ctx_get_fdb_ndm_flags(const struct zebra_dplane_ctx *ctx) {
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.macinfo.ndm_flags;
 }
 
 /*
@@ -7802,3 +8190,4 @@ void zebra_dplane_init(int (*results_fp)(struct dplane_ctx_list_head *))
 	zebra_dplane_init_internal();
 	zdplane_info.dg_results_cb = results_fp;
 }
+
