@@ -36,11 +36,37 @@ DEFINE_MTYPE_STATIC(ZEBRA, DP_NETFILTER, "Zebra Netfilter Internal Object");
 DEFINE_MTYPE_STATIC(ZEBRA, DP_NS, "DPlane NSes");
 
 DEFINE_MTYPE(ZEBRA, VLAN_CHANGE_ARR, "Vlan Change Array");
+DEFINE_MTYPE(ZEBRA, ROUTE, "Zebra DPlane ROUTE");
+
+DECLARE_MTYPE(ROUTE);
 
 #ifndef AOK
 #  define AOK 0
 #endif
 
+#define MY_RTA_ALIGN(len) (((len) + 3) & ~3)
+
+/* just for test functionality */
+struct rtmsg {
+	unsigned char		rtm_family;
+	unsigned char		rtm_dst_len;
+	unsigned char		rtm_src_len;
+	unsigned char		rtm_tos;
+
+	unsigned char		rtm_table;	/* Routing table id */
+	unsigned char		rtm_protocol;	/* Routing protocol; see below	*/
+	unsigned char		rtm_scope;	/* See below */	
+	unsigned char		rtm_type;	/* See below	*/
+
+	unsigned		rtm_flags;
+};
+
+struct rtattr {
+	unsigned short	rta_len;
+	unsigned short	rta_type;
+};
+
+#define RTA_MAX 30
 /*
  * Dataplane API version. This must be updated when any incompatible changes
  * are made. The minor version (at least) should be updated when new APIs
@@ -155,6 +181,9 @@ struct dplane_route_info {
 	enum blackhole_type zd_bh_type;
 	struct ipaddr zd_prefsrc;
 	struct ipaddr zd_gateway;
+	uint16_t nlmsg_type;
+	struct rtmsg rtm;
+	struct rtattr *route_tb[31];
 };
 
 /*
@@ -468,6 +497,9 @@ struct zebra_dplane_ctx {
 
 	/* Embedded list linkage */
 	struct dplane_ctx_list_item zd_entries;
+
+	/* Extra interface info, if requested */
+	int startup;
 };
 
 /* Flag that can be set by a pre-kernel provider as a signal that an update
@@ -777,6 +809,20 @@ static void dplane_ctx_free_internal(struct zebra_dplane_ctx *ctx)
 			nexthops_free(ctx->u.rinfo.old_backup_ng.nexthop);
 
 			ctx->u.rinfo.old_backup_ng.nexthop = NULL;
+		}
+
+		/* Free multipath array, if present */
+		// if (ctx->u.rinfo.zd_multipath_array) {
+		// 	XFREE(MTYPE_DP_MPATH, ctx->u.rinfo.zd_multipath_array);
+		// 	ctx->u.rinfo.zd_multipath_array = NULL;
+		// }
+		if (ctx->u.rinfo.route_tb) {
+			for (int i = 0; i <= RTA_MAX; i++) {
+				if (ctx->u.rinfo.route_tb[i]) {
+					XFREE(MTYPE_ROUTE, ctx->u.rinfo.route_tb[i]);
+					ctx->u.rinfo.route_tb[i] = NULL;
+				}
+			}	
 		}
 
 		/* Optional extra interface info */
@@ -2034,6 +2080,87 @@ void dplane_ctx_set_route_gw(struct zebra_dplane_ctx *ctx, const struct ipaddr *
 		ctx->u.rinfo.zd_gateway = *gw;
 	else
 		memset(&ctx->u.rinfo.zd_gateway, 0, sizeof(ctx->u.rinfo.zd_gateway));
+}
+
+int dplane_ctx_get_startup(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->startup;
+}
+
+void dplane_ctx_set_startup(struct zebra_dplane_ctx *ctx, int startup)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->startup = startup;
+}
+
+/* Replace route_tb with a deep-copied array of rta attributes */
+void dplane_ctx_set_route_tb(struct zebra_dplane_ctx *ctx,
+                             struct rtattr **rta)
+{
+    DPLANE_CTX_VALID(ctx);
+
+    if (!rta)
+        return;
+
+    for (int i = 0; i <= RTA_MAX; i++) {
+        if (ctx->u.rinfo.route_tb[i]) {
+            XFREE(MTYPE_ROUTE, ctx->u.rinfo.route_tb[i]);
+            ctx->u.rinfo.route_tb[i] = NULL;
+        }
+    }
+
+    for (int i = 0; i <= RTA_MAX; i++) {
+        if (rta[i]) {
+            size_t len = MY_RTA_ALIGN(rta[i]->rta_len);
+            ctx->u.rinfo.route_tb[i] = XMALLOC(MTYPE_ROUTE, len);
+            if (ctx->u.rinfo.route_tb[i]) {
+                memcpy(ctx->u.rinfo.route_tb[i], rta[i], len);
+            }
+        }
+    }
+}
+
+struct rtattr **dplane_ctx_get_route_tb(
+	const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	if (!ctx->u.rinfo.route_tb)
+		return NULL;
+
+	return ctx->u.rinfo.route_tb;
+}
+
+struct rtmsg *dplane_ctx_get_route_rtm(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return &(ctx->u.rinfo.rtm);
+}
+
+void dplane_ctx_set_route_rtm(struct zebra_dplane_ctx *ctx, struct rtmsg *rtm)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.rinfo.rtm = *rtm;
+}
+
+uint16_t dplane_ctx_get_route_nlmsg_type(const struct zebra_dplane_ctx *ctx)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	return ctx->u.rinfo.nlmsg_type;
+}
+
+void dplane_ctx_set_route_nlmsg_type(struct zebra_dplane_ctx *ctx,
+				     uint16_t nlmsg_type)
+{
+	DPLANE_CTX_VALID(ctx);
+
+	ctx->u.rinfo.nlmsg_type = nlmsg_type;
 }
 
 int dplane_ctx_tc_qdisc_get_kind(const struct zebra_dplane_ctx *ctx)

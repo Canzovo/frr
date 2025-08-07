@@ -70,6 +70,7 @@ DEFINE_HOOK(rib_update, (struct route_node * rn, const char *reason),
 	    (rn, reason));
 DEFINE_HOOK(rib_shutdown, (struct route_node * rn), (rn));
 
+void zebra_route_dplane_update(struct zebra_dplane_ctx *ctx);
 
 /*
  * Meta Q's specific names
@@ -5181,6 +5182,8 @@ static void rib_process_dplane_results(struct event *thread)
 				 */
 				if (dplane_ctx_get_notif_provider(ctx) == 0)
 					rib_process_result(ctx);
+				else					
+					zebra_route_dplane_update(ctx);
 				break;
 
 			case DPLANE_OP_ROUTE_NOTIFY:
