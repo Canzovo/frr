@@ -545,6 +545,15 @@ void dplane_ctx_set_route_prefsrc(struct zebra_dplane_ctx *ctx,
 const struct ipaddr *dplane_ctx_get_route_gw(const struct zebra_dplane_ctx *ctx);
 void dplane_ctx_set_route_gw(struct zebra_dplane_ctx *ctx, const struct ipaddr *gw);
 
+struct rtattr **dplane_ctx_get_route_tb(
+	const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_route_tb(struct zebra_dplane_ctx *ctx,
+			      struct rtattr **rta);
+int dplane_ctx_get_startup(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_startup(struct zebra_dplane_ctx *ctx, int startup);
+const struct rtmsg *dplane_ctx_get_route_rtm(const struct zebra_dplane_ctx *ctx);
+void dplane_ctx_set_route_rtm(struct zebra_dplane_ctx *ctx, struct rtmsg *rtm);
+
 /* Accessors for traffic control context */
 int dplane_ctx_tc_qdisc_get_kind(const struct zebra_dplane_ctx *ctx);
 const char *
@@ -910,7 +919,9 @@ enum zebra_dplane_result dplane_route_notif_update(
 	struct route_entry *re,
 	enum dplane_op_e op,
 	struct zebra_dplane_ctx *ctx);
-
+	
+int parse_encap_mpls(struct rtattr *tb, mpls_label_t *labels);
+void zebra_route_dplane_update(struct zebra_dplane_ctx *ctx);
 /*
  * Enqueue bridge port changes for the dataplane.
  */
