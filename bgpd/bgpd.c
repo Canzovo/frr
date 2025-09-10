@@ -1385,9 +1385,6 @@ struct peer *peer_unlock_with_caller(const char *name, struct peer *peer)
 
 int bgp_global_gr_init(struct bgp *bgp)
 {
-	if (BGP_DEBUG(graceful_restart, GRACEFUL_RESTART))
-		zlog_debug("%s called ..", __func__);
-
 	int local_GLOBAL_GR_FSM[BGP_GLOBAL_GR_MODE][BGP_GLOBAL_GR_EVENT_CMD] = {
 		/* GLOBAL_HELPER Mode  */
 		{
@@ -1457,9 +1454,6 @@ int bgp_global_gr_init(struct bgp *bgp)
 
 int bgp_peer_gr_init(struct peer *peer)
 {
-	if (BGP_DEBUG(graceful_restart, GRACEFUL_RESTART))
-		zlog_debug("%s called ..", __func__);
-
 	struct bgp_peer_gr local_Peer_GR_FSM[BGP_PEER_GR_MODE]
 					[BGP_PEER_GR_EVENT_CMD] = {
 	{
@@ -3123,6 +3117,15 @@ int peer_group_remote_as(struct bgp *bgp, const char *group_name, as_t *as,
 	peer_as_change(group->conf, *as, as_type, as_str);
 
 	for (ALL_LIST_ELEMENTS(group->peer, node, nnode, peer)) {
+		/*
+		 * Re-initiate RA for BGP unnumbered peers when peer group gets
+		 * remote-as configured. This ensures RA is restored after
+		 * peer_group_remote_as_delete() terminated it
+		 */
+		if (peer->conf_if && peer->ifp &&
+		    CHECK_FLAG(peer->flags, PEER_FLAG_CAPABILITY_ENHE))
+			bgp_zebra_initiate_radv(peer->bgp, peer);
+
 		if (((peer->as_type == AS_SPECIFIED) && peer->as != *as) ||
 		    (peer->as_type != as_type)) {
 			peer_as_change(peer, *as, as_type, as_str);
@@ -3541,6 +3544,12 @@ static struct bgp *bgp_create(as_t *as, const char *name,
 				   name, bgp->as_pretty);
 	}
 
+	/* Default the EVPN VRF to the default one */
+	if (inst_type == BGP_INSTANCE_TYPE_DEFAULT && !bgp_master.bgp_evpn) {
+		bgp_lock(bgp);
+		bm->bgp_evpn = bgp;
+	}
+
 	bgp_lock(bgp);
 
 	bgp->allow_martian = false;
@@ -3595,11 +3604,10 @@ peer_init:
 		bgp_maximum_paths_set(bgp, afi, safi, BGP_PEER_IBGP,
 				      multipath_num, 0);
 		/* Initialize graceful restart info */
-		bgp->gr_info[afi][safi].eor_required = 0;
-		bgp->gr_info[afi][safi].eor_received = 0;
 		bgp->gr_info[afi][safi].t_select_deferral = NULL;
 		bgp->gr_info[afi][safi].t_route_select = NULL;
 		bgp->gr_info[afi][safi].gr_deferred = 0;
+		bgp->gr_info[afi][safi].select_defer_over = false;
 	}
 
 	bgp->v_update_delay = bm->v_update_delay;
@@ -4101,13 +4109,11 @@ int bgp_delete(struct bgp *bgp)
 	struct bgp_dest *dest_next = NULL;
 	struct bgp_table *dest_table = NULL;
 	struct graceful_restart_info *gr_info;
-	uint32_t b_ann_cnt = 0, b_l2_cnt = 0, b_l3_cnt = 0;
-	uint32_t a_ann_cnt = 0, a_l2_cnt = 0, a_l3_cnt = 0;
-	struct bgp *bgp_to_proc = NULL;
-	struct bgp *bgp_to_proc_next = NULL;
 	struct bgp *bgp_default = bgp_get_default();
 	struct bgp_clearing_info *cinfo;
 	struct peer_connection *connection;
+	uint32_t b_ann_cnt = 0, b_l2_cnt = 0;
+	uint32_t a_ann_cnt = 0, a_l2_cnt = 0;
 
 	assert(bgp);
 
@@ -4141,21 +4147,11 @@ int bgp_delete(struct bgp *bgp)
 		}
 	}
 
-	b_l3_cnt = zebra_l3_vni_count(&bm->zebra_l3_vni_head);
-	for (bgp_to_proc = zebra_l3_vni_first(&bm->zebra_l3_vni_head); bgp_to_proc;
-	     bgp_to_proc = bgp_to_proc_next) {
-		bgp_to_proc_next = zebra_l3_vni_next(&bm->zebra_l3_vni_head, bgp_to_proc);
-		if (bgp_to_proc == bgp)
-			zebra_l3_vni_del(&bm->zebra_l3_vni_head, bgp_to_proc);
-	}
-
 	if (BGP_DEBUG(zebra, ZEBRA)) {
 		a_ann_cnt = zebra_announce_count(&bm->zebra_announce_head);
 		a_l2_cnt = zebra_l2_vni_count(&bm->zebra_l2_vni_head);
-		a_l3_cnt = zebra_l3_vni_count(&bm->zebra_l3_vni_head);
-		zlog_debug("BGP %s deletion FIFO cnt Zebra_Ann before %u after %u, L2_VNI before %u after, %u L3_VNI before %u after %u",
-			   bgp->name_pretty, b_ann_cnt, a_ann_cnt, b_l2_cnt, a_l2_cnt, b_l3_cnt,
-			   a_l3_cnt);
+		zlog_debug("FIFO Cleanup Count during BGP %s deletion :: Zebra Announce - before %u after %u :: BGP L2_VNI - before %u after %u",
+			   bgp->name_pretty, b_ann_cnt, a_ann_cnt, b_l2_cnt, a_l2_cnt);
 	}
 
 	/* Cleanup for peer connection batching */
@@ -8766,7 +8762,6 @@ void bgp_master_init(struct event_loop *master, const int buffer_size,
 
 	zebra_announce_init(&bm->zebra_announce_head);
 	zebra_l2_vni_init(&bm->zebra_l2_vni_head);
-	zebra_l3_vni_init(&bm->zebra_l3_vni_head);
 	bm->bgp = list_new();
 	bm->listen_sockets = list_new();
 	bm->port = BGP_PORT_DEFAULT;
@@ -8791,7 +8786,6 @@ void bgp_master_init(struct event_loop *master, const int buffer_size,
 	bm->select_defer_time = BGP_DEFAULT_SELECT_DEFERRAL_TIME;
 	bm->rib_stale_time = BGP_DEFAULT_RIB_STALE_TIME;
 	bm->t_bgp_zebra_l2_vni = NULL;
-	bm->t_bgp_zebra_l3_vni = NULL;
 
 	bm->peer_clearing_batch_id = 1;
 	/* TODO -- make these configurable */
@@ -9046,7 +9040,6 @@ void bgp_terminate(void)
 	event_cancel(&bm->t_bgp_start_label_manager);
 	event_cancel(&bm->t_bgp_zebra_route);
 	event_cancel(&bm->t_bgp_zebra_l2_vni);
-	event_cancel(&bm->t_bgp_zebra_l3_vni);
 
 	bgp_mac_finish();
 #ifdef ENABLE_BGP_VNC

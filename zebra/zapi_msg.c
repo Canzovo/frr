@@ -517,8 +517,9 @@ int zsend_redistribute_route(int cmd, struct zserv *client, const struct route_n
 	uint16_t count = 0;
 	afi_t afi;
 
+	zapi_route_init(&api);
 	srcdest_rnode_prefixes(rn, &p, &src_p);
-	memset(&api, 0, sizeof(api));
+
 	api.vrf_id = re->vrf_id;
 	api.type = re->type;
 	api.safi = SAFI_UNICAST;
@@ -563,6 +564,8 @@ int zsend_redistribute_route(int cmd, struct zserv *client, const struct route_n
 			continue;
 
 		api_nh = &api.nexthops[count];
+		zapi_nexthop_init(api_nh);
+
 		api_nh->vrf_id = nexthop->vrf_id;
 		api_nh->type = nexthop->type;
 		api_nh->weight = nexthop->weight;
@@ -3020,6 +3023,11 @@ static void zread_srv6_manager_get_locator_chunk(struct zserv *client,
 
 	/* Get data. */
 	STREAM_GETW(s, len);
+	if (len > SRV6_LOCNAME_SIZE) {
+		zlog_warn("%s: SRv6 locator name length %u exceeds maximum %d", __func__, len,
+			  SRV6_LOCNAME_SIZE);
+		goto stream_failure;
+	}
 	STREAM_GET(locator_name, s, len);
 
 	/* call hook to get a chunk using wrapper */
@@ -3040,6 +3048,11 @@ static void zread_srv6_manager_release_locator_chunk(struct zserv *client,
 
 	/* Get data. */
 	STREAM_GETW(s, len);
+	if (len > SRV6_LOCNAME_SIZE) {
+		zlog_warn("%s: SRv6 locator name length %u exceeds maximum %d", __func__, len,
+			  SRV6_LOCNAME_SIZE);
+		goto stream_failure;
+	}
 	STREAM_GET(locator_name, s, len);
 
 	/* call hook to release a chunk using wrapper */

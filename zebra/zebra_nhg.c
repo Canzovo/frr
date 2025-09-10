@@ -638,12 +638,9 @@ static int zebra_nhg_process_grp(struct nexthop_group *nhg, struct nhg_connected
 	nhg_connected_tree_init(depends);
 
 	for (int i = 0; i < count; i++) {
+		uint16_t weight;
 		struct nhg_hash_entry *depend = NULL;
-		/* We do not care about nexthop_grp.weight at
-		 * this time. But we should figure out
-		 * how to adapt this to our code in
-		 * the future.
-		 */
+
 		depend = depends_find_id_add(depends, grp[i].id);
 
 		if (!depend) {
@@ -660,8 +657,10 @@ static int zebra_nhg_process_grp(struct nexthop_group *nhg, struct nhg_connected
 		 * even possible to have a group within a group
 		 * in the kernel.
 		 */
-
+		weight = depend->nhg.nexthop->weight;
+		depend->nhg.nexthop->weight = grp[i].weight;
 		copy_nexthops(&nhg->nexthop, depend->nhg.nexthop, NULL);
+		depend->nhg.nexthop->weight = weight;
 	}
 
 	if (resilience)
@@ -1088,7 +1087,7 @@ static void zebra_nhg_set_valid(struct nhg_hash_entry *nhe, bool valid)
 			struct nexthop *nexthop = rb_node_dep->nhe->nhg.nexthop;
 
 			while (nexthop) {
-				if (nexthop_same(nexthop, nhe->nhg.nexthop)) {
+				if (nexthop_same_no_weight(nexthop, nhe->nhg.nexthop)) {
 					/* Invalid Nexthop */
 					UNSET_FLAG(nexthop->flags, NEXTHOP_FLAG_ACTIVE);
 				} else {
@@ -4116,8 +4115,7 @@ void zebra_interface_nhg_reinstall(struct interface *ifp)
 				struct nexthop *nhop_dependent =
 					rb_node_dependent->nhe->nhg.nexthop;
 
-				while (nhop_dependent &&
-				       !nexthop_same(nhop_dependent, nh))
+				while (nhop_dependent && !nexthop_same_no_weight(nhop_dependent, nh))
 					nhop_dependent = nhop_dependent->next;
 
 				if (nhop_dependent)

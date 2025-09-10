@@ -1461,7 +1461,7 @@ DEFPY(show_nexthop_group,
 
 	struct zebra_vrf *zvrf = NULL;
 	afi_t afi = AFI_UNSPEC;
-	int type = 0;
+	uint8_t type = 0;
 	bool uj = use_json(argc, argv);
 	json_object *json = NULL;
 	json_object *json_vrf = NULL;
@@ -1479,7 +1479,7 @@ DEFPY(show_nexthop_group,
 
 	if (type_str) {
 		type = proto_redistnum((afi ? afi : AFI_IP), type_str);
-		if (type < 0) {
+		if (type == ZEBRA_ROUTE_ERROR) {
 			/* assume zebra */
 			type = ZEBRA_ROUTE_NHG;
 		}
@@ -1657,7 +1657,7 @@ DEFPY (show_route,
 	safi_t safi = mrib ? SAFI_MULTICAST : SAFI_UNICAST;
 	bool first_vrf_json = true;
 	struct vrf *vrf;
-	int type = 0;
+	uint8_t type = 0;
 	struct zebra_vrf *zvrf;
 	struct route_show_ctx ctx = {
 		.multi = vrf_all || table_all,
@@ -1676,7 +1676,7 @@ DEFPY (show_route,
 	}
 	if (type_str) {
 		type = proto_redistnum(afi, type_str);
-		if (type < 0) {
+		if (type == ZEBRA_ROUTE_ERROR) {
 			vty_out(vty, "Unknown route type\n");
 			return CMD_WARNING;
 		}
@@ -3775,6 +3775,8 @@ DEFUN (show_zebra,
 	ttable_add_row(table, "v6 Route Replace Semantics|%s",
 		       zebra_vty_v6_rr_semantics_used() ? "Replace"
 							: "Delete then Add");
+	ttable_add_row(table, "Nexthop weight is 16 bits|%s",
+		       zrouter.nexthop_weight_is_16bit ? "Yes" : "No");
 
 #ifdef GNU_LINUX
 	if (!vrf_is_backend_netns())
@@ -3786,7 +3788,7 @@ DEFUN (show_zebra,
 #endif
 
 	ttable_add_row(table, "v6 with v4 nexthop|%s",
-		       zrouter.v6_with_v4_nexthop ? "Used" : "Unavaliable");
+		       zrouter.v6_with_v4_nexthop ? "Used" : "Unavailable");
 
 	ttable_add_row(table, "ASIC offload|%s",
 		       zrouter.asic_offloaded ? "Used" : "Unavailable");
@@ -3829,6 +3831,8 @@ DEFUN (show_zebra,
 		       zrouter.all_mc_forwardingv6 ? "On" : "Off");
 	ttable_add_row(table, "v6 Default MC Forwarding|%s",
 		       zrouter.default_mc_forwardingv6 ? "On" : "Off");
+	ttable_add_row(table, "Backup Nexthops Installed|%s",
+		       zrouter.backup_nhs_installed ? "Yes" : "No");
 
 	out = ttable_dump(table, "\n");
 	vty_out(vty, "%s\n", out);

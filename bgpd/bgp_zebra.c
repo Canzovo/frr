@@ -1308,6 +1308,8 @@ static void bgp_zebra_announce_parse_nexthop(
 		}
 		api_nh = &api->nexthops[*valid_nh_count];
 
+		zapi_nexthop_init(api_nh);
+
 		api_nh->srte_color = bgp_attr_get_color(info->attr);
 
 		if (bgp_debug_zebra(&api->prefix)) {
@@ -1524,7 +1526,7 @@ bgp_zebra_announce_actual(struct bgp_dest *dest, struct bgp_path_info *info,
 			  struct bgp *bgp)
 {
 	struct bgp_path_info *bpi_ultimate;
-	struct zapi_route api = { 0 };
+	struct zapi_route api;
 	unsigned int valid_nh_count = 0;
 	bool allow_recursion = false;
 	uint8_t distance;
@@ -1540,6 +1542,8 @@ bgp_zebra_announce_actual(struct bgp_dest *dest, struct bgp_path_info *info,
 				     true);
 		return ZCLIENT_SEND_SUCCESS;
 	}
+
+	zapi_route_init(&api);
 
 	/* Make Zebra API structure. */
 	api.vrf_id = bgp->vrf_id;
@@ -1731,7 +1735,7 @@ enum zclient_send_status bgp_zebra_withdraw_actual(struct bgp_dest *dest,
 		return ZCLIENT_SEND_SUCCESS;
 	}
 
-	memset(&api, 0, sizeof(api));
+	zapi_route_init(&api);
 	api.vrf_id = bgp->vrf_id;
 	api.type = ZEBRA_ROUTE_BGP;
 	api.safi = table->safi;
@@ -1906,8 +1910,16 @@ void bgp_zebra_route_install(struct bgp_dest *dest, struct bgp_path_info *info,
 	 * let's set the fact that we expect this route to be installed
 	 */
 	if (install) {
-		if (BGP_SUPPRESS_FIB_ENABLED(bgp))
-			SET_FLAG(dest->flags, BGP_NODE_FIB_INSTALL_PENDING);
+		if (BGP_SUPPRESS_FIB_ENABLED(bgp)) {
+			/*
+			 * If the dest has already been installed at some point
+			 * in time, we know that it is safe to immediately send
+			 * the route to peers since they have a path toward us
+			 * As such let's just let normal mechanisms fly
+			 */
+			if (!CHECK_FLAG(dest->flags, BGP_NODE_FIB_INSTALLED))
+				SET_FLAG(dest->flags, BGP_NODE_FIB_INSTALL_PENDING);
+		}
 
 		if (bgp->main_zebra_update_hold && !is_evpn)
 			return;
@@ -2535,10 +2547,13 @@ int bgp_zebra_advertise_gw_macip(struct bgp *bgp, int advertise, vni_t vni)
 	return zclient_send_message(bgp_zclient);
 }
 
-int bgp_zebra_vxlan_flood_control(struct bgp *bgp,
-				  enum vxlan_flood_control flood_ctrl)
+int bgp_zebra_vxlan_flood_control(struct bgp *bgp, struct bgpevpn *evpn)
 {
 	struct stream *s;
+	vni_t vni = evpn ? evpn->vni : VNI_MAX;
+	int flood_control = (evpn && evpn->vxlan_flood_ctrl != VXLAN_FLOOD_INHERIT_GLOBAL)
+				    ? evpn->vxlan_flood_ctrl
+				    : bgp->vxlan_flood_ctrl;
 
 	/* Check socket. */
 	if (!bgp_zclient || bgp_zclient->sock < 0)
@@ -2556,8 +2571,13 @@ int bgp_zebra_vxlan_flood_control(struct bgp *bgp,
 	s = bgp_zclient->obuf;
 	stream_reset(s);
 
+	if (BGP_DEBUG(zebra, ZEBRA))
+		zlog_debug("%s: Setting flood control for vni %u, flood_ctrl %d", __func__, vni,
+			   flood_control);
+
 	zclient_create_header(s, ZEBRA_VXLAN_FLOOD_CONTROL, bgp->vrf_id);
-	stream_putc(s, flood_ctrl);
+	stream_putc(s, flood_control);
+	stream_putl(s, vni);
 	stream_putw_at(s, 0, stream_get_endp(s));
 
 	return zclient_send_message(bgp_zclient);
@@ -3130,31 +3150,6 @@ void bgp_zebra_process_remote_routes_for_l2vni(struct event *e)
 				     20, &bm->t_bgp_zebra_l2_vni);
 }
 
-void bgp_zebra_process_remote_routes_for_l3vrf(struct event *e)
-{
-	/*
-	 * Install/Uninstall all remote routes belonging to l3vni
-	 *
-	 * NOTE:
-	 *  - At this point it does not matter whether we call
-	 *    install_routes_for_vrf/uninstall_routes_for_vrf.
-	 *  - Since we pass struct bgp as NULL,
-	 *      * we iterate the bm FIFO list
-	 *      * the second variable (true) is ignored as well and
-	 *        calculated based on the BGP-VRFs flags for ADD/DELETE.
-	 */
-	install_uninstall_routes_for_vrf(NULL, true);
-
-	/*
-	 * If there are L3VNIs still pending to be processed, schedule them
-	 * after a small sleep so that CPU can be used for other purposes.
-	 */
-	if (zebra_l3_vni_count(&bm->zebra_l3_vni_head)) {
-		event_add_timer_msec(bm->master, bgp_zebra_process_remote_routes_for_l3vrf, NULL,
-				     20, &bm->t_bgp_zebra_l3_vni);
-	}
-}
-
 static int bgp_zebra_process_local_es_add(ZAPI_CALLBACK_ARGS)
 {
 	esi_t esi;
@@ -3435,19 +3430,15 @@ static int bgp_zebra_process_local_ip_prefix(ZAPI_CALLBACK_ARGS)
 	if (cmd == ZEBRA_IP_PREFIX_ROUTE_ADD) {
 
 		if (p.family == AF_INET)
-			bgp_evpn_advertise_type5_route(bgp_vrf, &p, NULL,
-						       AFI_IP, SAFI_UNICAST);
+			bgp_evpn_advertise_type5_route(bgp_vrf, &p, NULL, AFI_IP, SAFI_UNICAST, 0);
 		else
-			bgp_evpn_advertise_type5_route(bgp_vrf, &p, NULL,
-						       AFI_IP6, SAFI_UNICAST);
+			bgp_evpn_advertise_type5_route(bgp_vrf, &p, NULL, AFI_IP6, SAFI_UNICAST, 0);
 
 	} else {
 		if (p.family == AF_INET)
-			bgp_evpn_withdraw_type5_route(bgp_vrf, &p, AFI_IP,
-						      SAFI_UNICAST);
+			bgp_evpn_withdraw_type5_route(bgp_vrf, &p, AFI_IP, SAFI_UNICAST, 0);
 		else
-			bgp_evpn_withdraw_type5_route(bgp_vrf, &p, AFI_IP6,
-						      SAFI_UNICAST);
+			bgp_evpn_withdraw_type5_route(bgp_vrf, &p, AFI_IP6, SAFI_UNICAST, 0);
 	}
 	return 0;
 }
@@ -3841,10 +3832,35 @@ static void bgp_zebra_process_srv6_locator_delete_per_bgp(struct srv6_locator *l
 	struct in6_addr *tovpn_sid;
 	struct prefix_ipv6 tmp_prefi;
 
-	// clear SRv6 locator
-	if (bgp->srv6_locator) {
-		srv6_locator_free(bgp->srv6_locator);
-		bgp->srv6_locator = NULL;
+	for (ALL_LIST_ELEMENTS_RO(bm->bgp, node, bgp_vrf)) {
+		if (bgp_vrf->inst_type != BGP_INSTANCE_TYPE_VRF)
+			/* TODO: accept SRv6 entries on default VRF */
+			continue;
+
+		if (bgp->inst_type == BGP_INSTANCE_TYPE_VRF && bgp_vrf != bgp)
+			continue;
+
+		tovpn_sid_locator = bgp_srv6_locator_lookup(bgp_vrf, bgp);
+		if (!tovpn_sid_locator)
+			continue;
+
+		if (!strmatch(tovpn_sid_locator->name, loc->name))
+			continue;
+
+		if (bgp_vrf->vpn_policy[AFI_IP].tovpn_sid_locator)
+			vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP, bgp_get_default(),
+					   bgp_vrf);
+
+		if (bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid_locator)
+			vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP6, bgp_get_default(),
+					   bgp_vrf);
+
+		if (bgp_vrf->tovpn_sid_locator) {
+			vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP, bgp_get_default(),
+					   bgp_vrf);
+			vpn_leak_prechange(BGP_VPN_POLICY_DIR_TOVPN, AFI_IP6, bgp_get_default(),
+					   bgp_vrf);
+		}
 	}
 
 	// refresh chunks
@@ -3865,12 +3881,20 @@ static void bgp_zebra_process_srv6_locator_delete_per_bgp(struct srv6_locator *l
 		}
 	}
 
-	// refresh tovpn_sid
+	// refresh tovpn_sid and tovpn_sid_locator
 	for (ALL_LIST_ELEMENTS_RO(bm->bgp, node, bgp_vrf)) {
+		if (bgp_vrf->inst_type != BGP_INSTANCE_TYPE_VRF)
+			/* TODO: accept SRv6 entries on default VRF */
+			continue;
+
 		if (bgp->inst_type == BGP_INSTANCE_TYPE_VRF && bgp != bgp_vrf)
 			continue;
 
-		if (bgp_vrf->inst_type != BGP_INSTANCE_TYPE_VRF)
+		tovpn_sid_locator = bgp_srv6_locator_lookup(bgp_vrf, bgp);
+		if (!tovpn_sid_locator)
+			continue;
+
+		if (!strmatch(tovpn_sid_locator->name, loc->name))
 			continue;
 
 		// refresh vpnv4 tovpn_sid
@@ -3880,9 +3904,13 @@ static void bgp_zebra_process_srv6_locator_delete_per_bgp(struct srv6_locator *l
 			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
 			tmp_prefi.prefix = *tovpn_sid;
 			if (prefix_match((struct prefix *)&loc->prefix,
-					 (struct prefix *)&tmp_prefi))
+					 (struct prefix *)&tmp_prefi)) {
 				XFREE(MTYPE_BGP_SRV6_SID,
 				      bgp_vrf->vpn_policy[AFI_IP].tovpn_sid);
+				/* refresh vpnv4 tovpn_sid_locator */
+				srv6_locator_free(bgp_vrf->vpn_policy[AFI_IP].tovpn_sid_locator);
+				bgp_vrf->vpn_policy[AFI_IP].tovpn_sid_locator = NULL;
+			}
 		}
 
 		// refresh vpnv6 tovpn_sid
@@ -3892,9 +3920,13 @@ static void bgp_zebra_process_srv6_locator_delete_per_bgp(struct srv6_locator *l
 			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
 			tmp_prefi.prefix = *tovpn_sid;
 			if (prefix_match((struct prefix *)&loc->prefix,
-					 (struct prefix *)&tmp_prefi))
+					 (struct prefix *)&tmp_prefi)) {
 				XFREE(MTYPE_BGP_SRV6_SID,
 				      bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid);
+				/* refresh vpnv6 tovpn_sid_locator */
+				srv6_locator_free(bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid_locator);
+				bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid_locator = NULL;
+			}
 		}
 
 		/* refresh per-vrf tovpn_sid */
@@ -3904,66 +3936,23 @@ static void bgp_zebra_process_srv6_locator_delete_per_bgp(struct srv6_locator *l
 			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
 			tmp_prefi.prefix = *tovpn_sid;
 			if (prefix_match((struct prefix *)&loc->prefix,
-					 (struct prefix *)&tmp_prefi))
+					 (struct prefix *)&tmp_prefi)) {
 				XFREE(MTYPE_BGP_SRV6_SID, bgp_vrf->tovpn_sid);
-		}
-	}
-
-	vpn_leak_postchange_all();
-
-	/* refresh tovpn_sid_locator */
-	for (ALL_LIST_ELEMENTS_RO(bm->bgp, node, bgp_vrf)) {
-		if (bgp->inst_type == BGP_INSTANCE_TYPE_VRF && bgp != bgp_vrf)
-			continue;
-
-		if (bgp_vrf->inst_type != BGP_INSTANCE_TYPE_VRF)
-			continue;
-
-		/* refresh vpnv4 tovpn_sid_locator */
-		tovpn_sid_locator =
-			bgp_vrf->vpn_policy[AFI_IP].tovpn_sid_locator;
-		if (tovpn_sid_locator) {
-			tmp_prefi.family = AF_INET6;
-			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
-			tmp_prefi.prefix = tovpn_sid_locator->prefix.prefix;
-			if (prefix_match((struct prefix *)&loc->prefix,
-					 (struct prefix *)&tmp_prefi)) {
-				srv6_locator_free(bgp_vrf->vpn_policy[AFI_IP]
-							  .tovpn_sid_locator);
-				bgp_vrf->vpn_policy[AFI_IP].tovpn_sid_locator =
-					NULL;
-			}
-		}
-
-		/* refresh vpnv6 tovpn_sid_locator */
-		tovpn_sid_locator =
-			bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid_locator;
-		if (tovpn_sid_locator) {
-			tmp_prefi.family = AF_INET6;
-			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
-			tmp_prefi.prefix = tovpn_sid_locator->prefix.prefix;
-			if (prefix_match((struct prefix *)&loc->prefix,
-					 (struct prefix *)&tmp_prefi)) {
-				srv6_locator_free(bgp_vrf->vpn_policy[AFI_IP6]
-							  .tovpn_sid_locator);
-				bgp_vrf->vpn_policy[AFI_IP6].tovpn_sid_locator =
-					NULL;
-			}
-		}
-
-		/* refresh per-vrf tovpn_sid_locator */
-		tovpn_sid_locator = bgp_vrf->tovpn_sid_locator;
-		if (tovpn_sid_locator) {
-			tmp_prefi.family = AF_INET6;
-			tmp_prefi.prefixlen = IPV6_MAX_BITLEN;
-			tmp_prefi.prefix = tovpn_sid_locator->prefix.prefix;
-			if (prefix_match((struct prefix *)&loc->prefix,
-					 (struct prefix *)&tmp_prefi)) {
+				/* refresh per-vrf tovpn_sid_locator */
 				srv6_locator_free(bgp_vrf->tovpn_sid_locator);
 				bgp_vrf->tovpn_sid_locator = NULL;
 			}
 		}
 	}
+
+	// clear SRv6 locator
+	if (bgp->srv6_locator) {
+		srv6_locator_free(bgp->srv6_locator);
+		bgp->srv6_locator = NULL;
+	}
+
+
+	vpn_leak_postchange_all();
 }
 
 static int bgp_zebra_process_srv6_locator_delete(ZAPI_CALLBACK_ARGS)
@@ -4351,7 +4340,7 @@ void bgp_zebra_announce_default(struct bgp *bgp, struct nexthop *nh,
 	if (afi != AFI_IP && afi != AFI_IP6)
 		return;
 	p.family = afi2family(afi);
-	memset(&api, 0, sizeof(api));
+	zapi_route_init(&api);
 	api.vrf_id = bgp->vrf_id;
 	api.type = ZEBRA_ROUTE_BGP;
 	api.safi = SAFI_UNICAST;
@@ -4361,6 +4350,8 @@ void bgp_zebra_announce_default(struct bgp *bgp, struct nexthop *nh,
 	SET_FLAG(api.message, ZAPI_MESSAGE_TABLEID);
 	SET_FLAG(api.message, ZAPI_MESSAGE_NEXTHOP);
 	api_nh = &api.nexthops[0];
+
+	zapi_nexthop_init(api_nh);
 
 	api.distance = ZEBRA_EBGP_DISTANCE_DEFAULT;
 	SET_FLAG(api.message, ZAPI_MESSAGE_DISTANCE);

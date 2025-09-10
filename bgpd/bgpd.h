@@ -20,7 +20,6 @@
 
 PREDECL_LIST(zebra_announce);
 PREDECL_LIST(zebra_l2_vni);
-PREDECL_LIST(zebra_l3_vni);
 
 /* For union sockunion.  */
 #include "queue.h"
@@ -223,10 +222,6 @@ struct bgp_master {
 	/* To preserve ordering of processing of L2 VNIs in BGP */
 	struct zebra_l2_vni_head zebra_l2_vni_head;
 
-	struct event *t_bgp_zebra_l3_vni;
-	/* To preserve ordering of processing of BGP-VRFs for L3 VNIs */
-	struct zebra_l3_vni_head zebra_l3_vni_head;
-
 	/* ID value for peer clearing batches */
 	uint32_t peer_clearing_batch_id;
 
@@ -325,11 +320,9 @@ enum bgp_instance_type {
 	BGP_INSTANCE_TYPE_VIEW
 };
 
-#define BGP_SEND_EOR(bgp, afi, safi)                                           \
-	(!CHECK_FLAG(bgp->flags, BGP_FLAG_GR_DISABLE_EOR)                      \
-	 && ((bgp->gr_info[afi][safi].t_select_deferral == NULL)               \
-	     || (bgp->gr_info[afi][safi].eor_required                          \
-		 == bgp->gr_info[afi][safi].eor_received)))
+#define BGP_SEND_EOR(bgp, afi, safi)                                                              \
+	(!CHECK_FLAG(bgp->flags, BGP_FLAG_GR_DISABLE_EOR) &&                                      \
+	 (!bgp_in_graceful_restart() || bgp->gr_info[afi][safi].select_defer_over))
 
 /* BGP GR Global ds */
 
@@ -338,10 +331,6 @@ enum bgp_instance_type {
 
 /* Graceful restart selection deferral timer info */
 struct graceful_restart_info {
-	/* Count of EOR message expected */
-	uint32_t eor_required;
-	/* Count of EOR received */
-	uint32_t eor_received;
 	/* Deferral Timer */
 	struct event *t_select_deferral;
 	/* Routes Deferred */
@@ -352,6 +341,7 @@ struct graceful_restart_info {
 	bool af_enabled;
 	/* Route update completed */
 	bool route_sync;
+	bool select_defer_over;
 };
 
 enum global_mode {
@@ -601,8 +591,7 @@ struct bgp {
 	char update_delay_peers_resume_time[64];
 	uint32_t established;
 	uint32_t restarted_peers;
-	uint32_t implicit_eors;
-	uint32_t explicit_eors;
+	uint32_t received_eors;
 #define BGP_UPDATE_DELAY_DEFAULT 0
 
 	/* Reference bandwidth for BGP link-bandwidth. Used when
@@ -665,9 +654,7 @@ struct bgp {
 #define BGP_FLAG_VNI_DOWN		 (1ULL << 38)
 #define BGP_FLAG_INSTANCE_HIDDEN	 (1ULL << 39)
 /* Prohibit BGP from enabling IPv6 RA on interfaces */
-#define BGP_FLAG_IPV6_NO_AUTO_RA (1ULL << 40)
-#define BGP_FLAG_L3VNI_SCHEDULE_FOR_INSTALL (1ULL << 41)
-#define BGP_FLAG_L3VNI_SCHEDULE_FOR_DELETE  (1ULL << 42)
+#define BGP_FLAG_IPV6_NO_AUTO_RA	    (1ULL << 40)
 #define BGP_FLAG_LINK_LOCAL_CAPABILITY	    (1ULL << 43)
 #define BGP_FLAG_VRF_MAY_LISTEN		    (1ULL << 44)
 
@@ -684,6 +671,11 @@ struct bgp {
 	 * - ZEBRA_GR_ENABLE / ZEBRA_GR_DISABLE
 	 */
 	enum zebra_gr_mode present_zebra_gr_state;
+
+	/* Is deferred path selection evaluated? Currently, this is done
+	 * upon first peer establishing in an instance.
+	 */
+	bool gr_select_defer_evaluated;
 
 	/* Is deferred path selection still not complete? */
 	bool gr_route_sync_pending;
@@ -1004,13 +996,9 @@ struct bgp {
 	uint64_t node_already_on_queue;
 	uint64_t node_deferred_on_queue;
 
-	struct zebra_l3_vni_item zl3vni;
-
 	QOBJ_FIELDS;
 };
 DECLARE_QOBJ_TYPE(bgp);
-
-DECLARE_LIST(zebra_l3_vni, struct bgp, zl3vni);
 
 struct bgp_interface {
 #define BGP_INTERFACE_MPLS_BGP_FORWARDING (1 << 0)
@@ -1822,7 +1810,7 @@ struct peer {
 #define PEER_STATUS_LLGR_WAIT (1U << 11)
 #define PEER_STATUS_REFRESH_PENDING (1U << 12) /* refresh request from peer */
 #define PEER_STATUS_RTT_SHUTDOWN (1U << 13) /* In shutdown state due to RTT */
-
+#define PEER_STATUS_GR_WAIT_EOR	    (1U << 14) /* wait for EOR */
 	/* Configured timer values. */
 	_Atomic uint32_t holdtime;
 	_Atomic uint32_t keepalive;
@@ -3053,6 +3041,17 @@ static inline bool bgp_gr_is_forwarding_preserved(struct bgp *bgp)
 		CHECK_FLAG(bgp->flags, BGP_FLAG_GR_PRESERVE_FWD));
 }
 
+static inline bool bgp_gr_supported_for_afi_safi(afi_t afi, safi_t safi)
+{
+	/*
+	 * GR restarter behavior is supported only for IPv4-unicast
+	 * and IPv6-unicast.
+	 */
+	if ((afi == AFI_IP && safi == SAFI_UNICAST) || (afi == AFI_IP6 && safi == SAFI_UNICAST))
+		return true;
+	return false;
+}
+
 /* For benefit of rfapi */
 extern struct peer *peer_new(struct bgp *bgp);
 
@@ -3138,9 +3137,10 @@ struct srv6_locator *bgp_srv6_locator_lookup(struct bgp *bgp_vrf, struct bgp *bg
 	 !(_afi == AFI_IP && _safi == SAFI_MPLS_VPN) &&                        \
 	 !(_afi == AFI_IP6 && _safi == SAFI_MPLS_VPN))
 
-#define PEER_HAS_LINK_LOCAL_CAPABILITY(_peer)                                                      \
-	(CHECK_FLAG(_peer->flags, PEER_FLAG_CAPABILITY_LINK_LOCAL) &&                              \
-	 CHECK_FLAG(_peer->cap, PEER_CAP_LINK_LOCAL_ADV) &&                                        \
-	 CHECK_FLAG(_peer->cap, PEER_CAP_LINK_LOCAL_RCV))
+#define PEER_HAS_LINK_LOCAL_CAPABILITY(_peer)                                                     \
+	(CHECK_FLAG(_peer->flags, PEER_FLAG_CAPABILITY_LINK_LOCAL) &&                             \
+	 CHECK_FLAG(_peer->cap, PEER_CAP_LINK_LOCAL_ADV) &&                                       \
+	 CHECK_FLAG(_peer->cap, PEER_CAP_LINK_LOCAL_RCV) &&                                       \
+	 IN6_IS_ADDR_LINKLOCAL(&_peer->nexthop.v6_local))
 
 #endif /* _QUAGGA_BGPD_H */

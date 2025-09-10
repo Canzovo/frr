@@ -101,8 +101,7 @@ extern int bgp_zebra_advertise_svi_macip(struct bgp *bgp, int advertise,
 					 vni_t vni);
 extern int bgp_zebra_advertise_all_vni(struct bgp *bgp, int advertise);
 extern int bgp_zebra_dup_addr_detection(struct bgp *bgp);
-extern int bgp_zebra_vxlan_flood_control(struct bgp *bgp,
-					 enum vxlan_flood_control flood_ctrl);
+extern int bgp_zebra_vxlan_flood_control(struct bgp *bgp, struct bgpevpn *evpn);
 
 extern int bgp_zebra_num_connects(void);
 
@@ -153,5 +152,4 @@ extern enum zclient_send_status
 bgp_zebra_withdraw_actual(struct bgp_dest *dest, struct bgp_path_info *info,
 			  struct bgp *bgp);
 extern void bgp_zebra_process_remote_routes_for_l2vni(struct event *e);
-extern void bgp_zebra_process_remote_routes_for_l3vrf(struct event *e);
 #endif /* _QUAGGA_BGP_ZEBRA_H */
